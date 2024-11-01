@@ -7,5 +7,6 @@ namespace dweb
     {
     public:
         void run();
+        void poll();
     };
 }
