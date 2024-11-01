@@ -1,5 +1,5 @@
-project(dwebproxy)
 
-add_subdirectory(src)
+SET(PROG "dweb_proxy")
 
-add_subdirectory(tests)
+
+add_executable(${PROG} main.cc)
