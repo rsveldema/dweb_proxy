@@ -1,7 +1,7 @@
 #include <boost/asio/impl/src.hpp>
 #include <boost/asio/ssl/impl/src.hpp>
 
-#include <server.hpp>
+#include "server.hpp"
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -58,23 +58,26 @@ awaitable<void> listener()
   }
 }
 
+    Server::Server()
+    {
+        m_io_context = std::make_unique<boost::asio::io_context>(1);
+
+        boost::asio::signal_set signals(*m_io_context, SIGINT, SIGTERM);
+        signals.async_wait([&](auto, auto){ m_io_context->stop(); });
+
+        co_spawn(*m_io_context, listener(), detached);
+    }
 
     void Server::poll()
     {
+        m_io_context->poll();
     }
 
     void Server::run()
     {
-        boost::asio::io_context io_context(1);
-
-        boost::asio::signal_set signals(io_context, SIGINT, SIGTERM);
-        signals.async_wait([&](auto, auto){ io_context.stop(); });
-
-        co_spawn(io_context, listener(), detached);
-
         try
         {
-            io_context.run();
+            m_io_context->run();
         }
         catch (std::exception& e)
         {

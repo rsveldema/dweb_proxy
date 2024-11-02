@@ -24,7 +24,7 @@ target_compile_definitions(${LIB}
   BOOST_ASIO_SEPARATE_COMPILATION=1
 )
 
-target_link_libraries(${LIB} PRIVATE
+target_link_libraries(${LIB} PUBLIC
   Boost::filesystem
   Boost::thread  
   Boost::system 
