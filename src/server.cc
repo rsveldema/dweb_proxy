@@ -17,6 +17,9 @@
 #include <cstdio>
 #include <fstream>
 
+#include <boost/certify/extensions.hpp>
+#include <boost/certify/https_verification.hpp>
+
 namespace beast = boost::beast;   // from <boost/beast.hpp>
 namespace http = beast::http;     // from <boost/beast/http.hpp>
 namespace net = boost::asio;      // from <boost/asio.hpp>
@@ -34,7 +37,7 @@ std::string read_file(const std::string &path)
   return strStream.str();
 }
 
-inline void load_server_certificate(boost::asio::ssl::context &ctx)
+inline void load_server_certificate(boost::asio::ssl::context &ssl_ctxt)
 {
   /*
       The certificate was generated from bash on Ubuntu (OpenSSL 1.1.1f) using:
@@ -44,30 +47,39 @@ inline void load_server_certificate(boost::asio::ssl::context &ctx)
      cert.pem -subj "/C=US/ST=CA/L=Los Angeles/O=Beast/CN=localhost"
   */
 
-  std::string const cert = read_file("certs/cert.pem");
-  std::string const key = read_file("certs/key.pem");
-  std::string const dh = read_file("certs/dh.pem");
+  const auto cert = read_file("certs/server.test.crt");
+  const auto key = read_file("certs/server.test.key");
+  const auto dh = read_file("certs/dh.pem");
 
-  ctx.set_password_callback(
+  ssl_ctxt.set_password_callback(
       [](std::size_t, boost::asio::ssl::context_base::password_purpose) {
+        printf("password query intercepted!\n");
         return "test";
       });
 
-  /*
-  ctx.set_options(boost::asio::ssl::context::default_workarounds |
-                  boost::asio::ssl::context::no_sslv2 |
-                  boost::asio::ssl::context::single_dh_use);
-                  */
-  ctx.set_options(boost::asio::ssl::context::default_workarounds |
-                  boost::asio::ssl::context::no_sslv2 |
-                  boost::asio::ssl::context::no_sslv3);
+  ssl_ctxt.set_options(boost::asio::ssl::context::default_workarounds |
+                       boost::asio::ssl::context::sslv3_server |
+                       boost::asio::ssl::context::sslv2_server |
+                       //  boost::asio::ssl::context::sslv23_server
+                       boost::asio::ssl::context::no_sslv2 |
+                       //   boost::asio::ssl::context::no_sslv3 |
+                       boost::asio::ssl::context::single_dh_use);
 
-  ctx.use_certificate_chain(boost::asio::buffer(cert.data(), cert.size()));
+  ssl_ctxt.use_certificate_chain(boost::asio::buffer(cert.data(), cert.size()));
 
-  ctx.use_private_key(boost::asio::buffer(key.data(), key.size()),
-                      boost::asio::ssl::context::file_format::pem);
+  ssl_ctxt.use_private_key(boost::asio::buffer(key.data(), key.size()),
+                           boost::asio::ssl::context::file_format::pem);
 
-  ctx.use_tmp_dh(boost::asio::buffer(dh.data(), dh.size()));
+  ssl_ctxt.use_tmp_dh(boost::asio::buffer(dh.data(), dh.size()));
+
+  boost::certify::enable_native_https_server_verification(ssl_ctxt);
+  ssl_ctxt.set_verify_mode(
+      boost::asio::ssl::
+          verify_peer); // |
+                        // boost::asio::ssl::context::verify_fail_if_no_peer_cert);
+  ssl_ctxt.set_default_verify_paths();
+
+  SSL_CTX_set_session_cache_mode(ssl_ctxt.native_handle(), SSL_SESS_CACHE_OFF);
 }
 
 namespace dweb
@@ -76,9 +88,9 @@ Server::Server()
 {
   m_io_context = std::make_unique<boost::asio::io_context>(1);
 
-  m_ctx = std::make_unique<ssl::context>(ssl::context::tlsv12);
+  m_ssl_ctxt = std::make_unique<ssl::context>(ssl::context::tlsv12);
 
-  load_server_certificate(*m_ctx);
+  load_server_certificate(*m_ssl_ctxt);
 
   m_acceptor = std::make_shared<tcp::acceptor>(
       *m_io_context, tcp::endpoint{net::ip::make_address("127.0.0.1"), 8443});
@@ -98,14 +110,15 @@ http::message_generator handle_request(
   res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
   res.set(http::field::content_type, "text/html");
   res.keep_alive(req.keep_alive());
-  res.body() = std::string("unimplemented !!");
+  static int counter = 0;
+  res.body() = std::string("unimplemented -- ") + std::to_string(counter++);
   res.prepare_payload();
   return res;
 }
 
 void Server::handle_session(tcp::socket &socket)
 {
-  ssl::stream<tcp::socket &> stream{socket, *m_ctx};
+  ssl::stream<tcp::socket &> stream{socket, *m_ssl_ctxt};
 
   spdlog::info("new session!");
 
@@ -144,6 +157,8 @@ void Server::handle_session(tcp::socket &socket)
   stream.shutdown(ec);
   if (ec)
     return fail(ec, "shutdown");
+
+  spdlog::info("exiting session--------------------")
 }
 
 void Server::poll()

@@ -20,7 +20,7 @@ namespace dweb
     private:
         Logger m_logger;
         std::unique_ptr<boost::asio::io_context> m_io_context;
-        std::unique_ptr<boost::asio::ssl::context> m_ctx;
+        std::unique_ptr<boost::asio::ssl::context> m_ssl_ctxt;
         std::shared_ptr<boost::asio::ip::tcp::acceptor> m_acceptor;
 
         void handle_session(boost::asio::ip::tcp::socket &socket);
