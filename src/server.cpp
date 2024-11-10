@@ -4,6 +4,8 @@
 #include "server.hpp"
 #include <thread>
 
+#include "logger.hpp"
+
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 

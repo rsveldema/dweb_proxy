@@ -68,9 +68,9 @@ std::unique_ptr<string_response> Response::to_string_response()
 }
 
 std::unique_ptr<Response> MessageHandler::get_response(
-    const std::string &body, const header_map_t &headers)
+    const std::string &request_body, const header_map_t &headers)
 {
-  LOG_INFO("request response: '{}' - target {}", body, m_target);
+  LOG_INFO("request response: '{}' - target {}", request_body, m_target);
 
   auto full_url_str = m_target.substr(1);
   if (full_url_str.find("://") == std::string::npos)
@@ -88,19 +88,34 @@ std::unique_ptr<Response> MessageHandler::get_response(
   const auto url = r.value();
   const auto host = url.host();
   std::string port = url.port();
-  const auto path = url.path();
+  std::string path = url.path();
   int version = 11;
+
+  if (host == "")
+  {
+    // user didn't pass us the URL, lets return an error
+    return std::make_unique<Response>(m_version, m_keep_alive,
+                                      ResponseType::ERR_BAD_URL,
+                                      "missing url to dweb-proxy: " + full_url_str);
+  }
 
   if (port == "")
   {
     port = "443";
   }
 
+  if (path == "")
+  {
+    path = "/";
+  }
+
+  LOG_INFO("HOST NAME: {}, PORT: {}, PATH: {}, INPUT: {}", host, port, path, full_url_str);
+
   // The SSL context is required, and holds certificates
   auto ctx = std::make_unique<ssl::context>(ssl::context::tlsv12);
 
   // Verify the remote server's certificate
-  ctx->set_verify_mode(ssl::verify_peer);
+  ctx->set_verify_mode(ssl::verify_none);
 
   tcp::resolver resolver(*m_io_context);
   ssl::stream<beast::tcp_stream> stream(*m_io_context, *ctx);
@@ -153,13 +168,23 @@ std::unique_ptr<Response> MessageHandler::get_response(
 
   http::read(stream, buffer, res);
 
-  LOG_INFO("reply from remote: {}", res.body().size());
+  LOG_INFO("reply from remote: {} bytes", res.body().size());
+
+  const auto cdata = res.body().cdata();
+  std::vector<char> vec;
+  for (auto it: cdata)
+  {
+    const char* data = (char*) it.data();
+    const auto size = it.size();
+
+    vec.insert(vec.end(), data, data + size);
+  }
 
   beast::error_code ec;
   stream.shutdown(ec);
 
   return std::make_unique<Response>(m_version, m_keep_alive,
-                                    ResponseType::ERR_OK, "");
+                                    ResponseType::ERR_OK, vec.data());
 }
 
 string_response MessageHandler::get_internal_error_reply()
