@@ -12,4 +12,10 @@ Logger()
 {
     spdlog::cfg::load_env_levels();
 }
+
+#define STRINGIZE_DETAIL(x) #x
+#define STRINGIZE(x) STRINGIZE_DETAIL(x)
+
+#define LOG_INFO(...)  LOG_INFO( __FILE__   ": "  STRINGIZE(__LINE__) ": "  __VA_ARGS__);
+
 };

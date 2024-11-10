@@ -6,7 +6,6 @@
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
-#include <boost/beast/version.hpp>
 
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -16,6 +15,8 @@
 #include <boost/asio/write.hpp>
 #include <cstdio>
 #include <fstream>
+
+#include <request_handler.hpp>
 
 #include <boost/certify/extensions.hpp>
 #include <boost/certify/https_verification.hpp>
@@ -49,7 +50,7 @@ inline void load_server_certificate(boost::asio::ssl::context &ssl_ctxt)
 
   auto home = getenv("HOME");
   assert(home);
-  
+
   const auto cert = read_file(fmt::format("{}/certs/server.test.crt", home));
   const auto key = read_file(fmt::format("{}/certs/server.test.key", home));
   const auto dh = read_file(fmt::format("{}/certs/dh.pem", home));
@@ -101,57 +102,97 @@ Server::Server()
 
 void fail(beast::error_code ec, char const *what)
 {
-  spdlog::error("fail: {} - {}", ec.message(), what);
+  LOG_INFO("fail: {} - {}", ec.message(), what);
 }
 
 template <class Body, class Allocator>
-http::message_generator handle_request(
-    http::request<Body, http::basic_fields<Allocator>> &&req)
+http::message_generator create_response(
+    http::request<Body, http::basic_fields<Allocator>> &&req,
+    int &counter,
+    std::shared_ptr<boost::asio::io_context> io_context)
 {
-  http::response<http::string_body> res{http::status::bad_request,
-                                        req.version()};
-  res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-  res.set(http::field::content_type, "text/html");
-  res.keep_alive(req.keep_alive());
-  static int counter = 0;
-  res.body() = std::string("unimplemented -- ") + std::to_string(counter++);
-  res.prepare_payload();
-  return res;
+  dweb::MessageHandler handler(io_context, req.version(), req.keep_alive(),
+                               req.base().method(), req.target());
+
+  header_map_t headers;
+  for (const auto &it : req.base())
+  {
+    const auto k = it.name();
+    const std::string v = it.value();
+    headers[k] = v;
+  }
+
+  auto response = handler.get_response(req.body(), headers);
+
+  if (auto string_response = response->to_string_response())
+  {
+    auto res = *string_response;
+    return res;
+  }
+
+  return handler.get_internal_error_reply();
+}
+
+bool Server::handle_single_request(int &counter,
+                                   beast::flat_buffer &buffer,
+                                   ssl::stream<tcp::socket &> &stream)
+{
+  // Read a request
+  beast::error_code ec;
+
+  http::request<http::string_body> req;
+  http::read(stream, buffer, req, ec);
+  if (ec == http::error::end_of_stream)
+  {
+    LOG_INFO("end of stream");
+    return false;
+  }
+  if (ec)
+  {
+    fail(ec, "read");
+    return false;
+  }
+
+  auto msg = create_response(std::move(req), counter, m_io_context);
+
+  bool keep_alive = msg.keep_alive();
+  beast::write(stream, std::move(msg), ec);
+  if (ec)
+  {
+    fail(ec, "write");
+    return false;
+  }
+
+  if (!keep_alive)
+  {
+    LOG_INFO("not keep-alive, existing");
+    return false;
+  }
+  return true;
 }
 
 void Server::handle_session(tcp::socket &socket)
 {
   ssl::stream<tcp::socket &> stream{socket, *m_ssl_ctxt};
 
-  spdlog::info("new session!");
+  LOG_INFO("new session: {}", socket.native_handle());
 
   beast::error_code ec;
   stream.handshake(ssl::stream_base::server, ec);
   if (ec)
+  {
     return fail(ec, "handshake");
+  }
 
   beast::flat_buffer buffer;
 
-  spdlog::info("everything ok, lets see what we get!");
+  LOG_INFO("everything ok, lets see what we get!");
 
-  for (;;)
+  int counter = 0;
+
+  while (true)
   {
-    // Read a request
-    http::request<http::string_body> req;
-    http::read(stream, buffer, req, ec);
-    if (ec == http::error::end_of_stream)
-      break;
-    if (ec)
-      return fail(ec, "read");
-
-    http::message_generator msg = handle_request(std::move(req));
-
-    bool keep_alive = msg.keep_alive();
-    beast::write(stream, std::move(msg), ec);
-    if (ec)
-      return fail(ec, "write");
-
-    if (!keep_alive)
+    if (!handle_single_request(counter, buffer, stream))
     {
       break;
     }
@@ -161,7 +202,7 @@ void Server::handle_session(tcp::socket &socket)
   if (ec)
     return fail(ec, "shutdown");
 
-  spdlog::info("exiting session--------------------");
+  LOG_INFO("exiting session--------------------");
 }
 
 void Server::poll()
@@ -171,6 +212,7 @@ void Server::poll()
 
   auto thr = std::thread([this, copy_socket = std::move(socket)]() mutable {
     handle_session(copy_socket);
+    copy_socket.close();
   });
   thr.detach();
 }

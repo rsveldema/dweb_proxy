@@ -1,3 +1,3 @@
 
 
-add_executable(unittests main.cc)
+add_executable(unittests main.cpp)
