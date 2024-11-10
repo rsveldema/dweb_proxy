@@ -47,9 +47,12 @@ inline void load_server_certificate(boost::asio::ssl::context &ssl_ctxt)
      cert.pem -subj "/C=US/ST=CA/L=Los Angeles/O=Beast/CN=localhost"
   */
 
-  const auto cert = read_file("certs/server.test.crt");
-  const auto key = read_file("certs/server.test.key");
-  const auto dh = read_file("certs/dh.pem");
+  auto home = getenv("HOME");
+  assert(home);
+  
+  const auto cert = read_file(fmt::format("{}/certs/server.test.crt", home));
+  const auto key = read_file(fmt::format("{}/certs/server.test.key", home));
+  const auto dh = read_file(fmt::format("{}/certs/dh.pem", home));
 
   ssl_ctxt.set_password_callback(
       [](std::size_t, boost::asio::ssl::context_base::password_purpose) {
@@ -158,18 +161,14 @@ void Server::handle_session(tcp::socket &socket)
   if (ec)
     return fail(ec, "shutdown");
 
-  spdlog::info("exiting session--------------------")
+  spdlog::info("exiting session--------------------");
 }
 
 void Server::poll()
 {
-  // This will receive the new connection
   tcp::socket socket{*m_io_context};
-
-  // Block until we get a connection
   m_acceptor->accept(socket);
 
-  // Launch the session, transferring ownership of the socket
   auto thr = std::thread([this, copy_socket = std::move(socket)]() mutable {
     handle_session(copy_socket);
   });
