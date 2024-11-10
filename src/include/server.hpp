@@ -9,6 +9,8 @@
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/core.hpp>
 
+#include <AutoDiscovery.hpp>
+
 namespace dweb
 {
 using ssl_stream = boost::asio::ssl::stream<boost::asio::ip::tcp::socket &>;
@@ -25,6 +27,7 @@ class Server
   std::shared_ptr<boost::asio::io_context> m_io_context;
   std::unique_ptr<boost::asio::ssl::context> m_ssl_ctxt;
   std::shared_ptr<boost::asio::ip::tcp::acceptor> m_acceptor;
+  std::unique_ptr<AutoDiscovery> m_auto_discovery;
 
   void handle_session(boost::asio::ip::tcp::socket &socket);
 

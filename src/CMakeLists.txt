@@ -15,7 +15,10 @@ FetchContent_MakeAvailable(Boost)
 set(LIB "dweb_proxy_lib")
 set(PROG "dweb_proxy")
 
-add_library(${LIB} server.cpp request_handler.cpp)
+add_library(${LIB} 
+  AutoDiscovery.cpp  
+  server.cpp 
+  request_handler.cpp)
 set_property(TARGET ${LIB} PROPERTY CXX_STANDARD 20)
 target_include_directories(${LIB} PUBLIC include) 
 
@@ -37,6 +40,9 @@ target_link_libraries(${LIB} PUBLIC
     crypto
     spdlog
     fmt
+    avahi-core
+    avahi-common
+    avahi-client
 )
 
 

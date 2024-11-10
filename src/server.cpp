@@ -100,6 +100,8 @@ Server::Server()
 
   m_acceptor = std::make_shared<tcp::acceptor>(
       *m_io_context, tcp::endpoint{net::ip::make_address("127.0.0.1"), 8443});
+
+  m_auto_discovery = std::make_unique<AutoDiscovery>();
 }
 
 void fail(beast::error_code ec, char const *what)
@@ -221,6 +223,7 @@ void Server::poll()
 
 void Server::run()
 {
+  m_auto_discovery->start();
   while (true)
   {
     poll();
